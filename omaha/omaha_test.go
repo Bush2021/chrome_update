@@ -3,6 +3,7 @@ package omaha
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"io"
 	"net/http"
@@ -15,7 +16,8 @@ import (
 
 // testdata holds answers Google's server gave on 28 October 2026, without
 // the variations seed: diff-48-x64.txt for x64 156.0.8078.48 with its
-// package cached, install-x64.txt for a fresh x64 install.
+// package cached, install-x64.txt for a fresh x64 install, and
+// installer-x64.xml for the same over protocol 3.
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile("testdata/" + name)
@@ -26,8 +28,9 @@ func fixture(t *testing.T, name string) []byte {
 }
 
 const (
-	pkg74 = "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
-	pkg48 = "f103730ff086d28c880c0de44e7fc6a7df72ce79c1e83dc6a46151031c490f6b"
+	pkg74       = "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+	pkg48       = "f103730ff086d28c880c0de44e7fc6a7df72ce79c1e83dc6a46151031c490f6b"
+	installer74 = "8783e3a9a3bb263a6b39da9e9ea6bdb7f31bb9dc9806f9b438ae7c1dde0480b0"
 )
 
 func TestParsePatchAnswer(t *testing.T) {
@@ -173,6 +176,71 @@ func TestCheckAgainstAServer(t *testing.T) {
 	}
 }
 
+func TestParseInstaller(t *testing.T) {
+	in, err := parseInstaller(fixture(t, "installer-x64.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Version != "156.0.8078.74" || in.Name != "156.0.8078.74_chrome_installer_uncompressed.exe" || in.Size != 525470120 ||
+		in.SHA1 != "365c3245e3c0c4ecbbbb4a6d1e6c2ee13550c1dd" || in.SHA256 != installer74 {
+		t.Errorf("%+v", in)
+	}
+	const link = "edgedl.me.gvt1.com/edgedl/release2/chrome/adnbzwqfdty3qpprdhwig7aufvyq_156.0.8078.74/156.0.8078.74_chrome_installer_uncompressed.exe"
+	if len(in.URLs) != 6 || in.URLs[0] != "http://"+link || in.URLs[1] != "https://"+link {
+		t.Errorf("urls %v", in.URLs)
+	}
+}
+
+func TestParseInstallerStatuses(t *testing.T) {
+	for _, b := range []string{
+		`<response protocol="3.0"/>`,
+		`<response protocol="3.0"><app status="error-unknownApplication"/></response>`,
+		`<response protocol="3.0"><app status="ok"><updatecheck status="noupdate"/></app></response>`,
+		`<response protocol="3.0"><app status="ok"><updatecheck status="ok"><manifest version="156.0.8078.74"/></updatecheck></app></response>`,
+	} {
+		if _, err := parseInstaller([]byte(b)); !errors.Is(err, ErrStatus) {
+			t.Errorf("%s: %v is not ErrStatus", b, err)
+		}
+	}
+	if _, err := parseInstaller([]byte("<html>")); err == nil || errors.Is(err, ErrStatus) {
+		t.Errorf("<html>: %v", err)
+	}
+}
+
+func TestInstallerAgainstAServer(t *testing.T) {
+	answer := fixture(t, "installer-x64.xml")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Protocol string `xml:"protocol,attr"`
+			OS       struct {
+				Arch string `xml:"arch,attr"`
+			} `xml:"os"`
+			App struct {
+				AppID string `xml:"appid,attr"`
+				AP    string `xml:"ap,attr"`
+			} `xml:"app"`
+		}
+		if err := xml.NewDecoder(r.Body).Decode(&req); err != nil || req.Protocol != "3.0" || req.OS.Arch != "x64" ||
+			req.App.AppID != "{8A69D345-D564-463C-AFF1-A69D9E530F96}" || req.App.AP != "x64-stable" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Write(answer)
+	}))
+	defer srv.Close()
+	c := &Client{InstallerEndpoint: srv.URL}
+	in, err := c.Installer(context.Background(), Stable, "x64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Version != "156.0.8078.74" || in.SHA256 != installer74 {
+		t.Errorf("%+v", in)
+	}
+	if _, err := c.Installer(context.Background(), Stable, "mips"); err == nil {
+		t.Error("accepted an unknown architecture")
+	}
+}
+
 func TestCheckLive(t *testing.T) {
 	if os.Getenv("CHROME_UPDATE_LIVE") == "" {
 		t.Skip("set CHROME_UPDATE_LIVE=1 to ask Google's server")
@@ -203,5 +271,25 @@ func TestCheckLive(t *testing.T) {
 	// at all, the server no longer takes the request for its updater's.
 	if xz == 0 {
 		t.Error("no answer offers the xz stream")
+	}
+}
+
+func TestInstallerLive(t *testing.T) {
+	if os.Getenv("CHROME_UPDATE_LIVE") == "" {
+		t.Skip("set CHROME_UPDATE_LIVE=1 to ask Google's server")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	for _, ch := range Channels {
+		for _, arch := range []string{"x86", "x64", "arm64"} {
+			in, err := (&Client{}).Installer(ctx, ch, arch)
+			if err != nil {
+				t.Fatalf("%s %s: %v", ch, arch, err)
+			}
+			if in.Size == 0 || len(in.SHA1) != 40 || len(in.SHA256) != 64 || len(in.URLs) == 0 {
+				t.Errorf("%s %s: %+v", ch, arch, in)
+			}
+			t.Logf("%s %s: %s, %d bytes", ch, arch, in.Version, in.Size)
+		}
 	}
 }

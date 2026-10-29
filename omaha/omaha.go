@@ -1,17 +1,23 @@
-// Package omaha asks Google's update server, over protocol 4, which Chrome
-// build is current and how to download it.
+// Package omaha asks Google's update server which Chrome build is current
+// and how to download it: over protocol 4 for the pipelines Chrome's
+// updater runs, or over protocol 3 for links to the full installer, which
+// protocol 4 offers only inside a CRX3 package.
 //
-// The request names Google's own updater, as chrome_installer's protocol 4
-// test does: only such requests get the xz stream and the Zucchini and
-// Puffin patches, and any other name gets only the full package. The
-// protocol is described in Chromium's docs/updater/protocol_4.md.
+// Protocol 4 requests name Google's own updater, as chrome_installer's
+// protocol 4 test does: only such requests get the xz stream and the
+// Zucchini and Puffin patches, and any other name gets only the full
+// package. The protocol is described in Chromium's
+// docs/updater/protocol_4.md.
 package omaha
 
 import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +26,10 @@ import (
 	"strings"
 )
 
-const Endpoint = "https://update.googleapis.com/service/update2/json"
+const (
+	Endpoint          = "https://update.googleapis.com/service/update2/json"
+	InstallerEndpoint = "https://tools.google.com/service/update2"
+)
 
 const (
 	updaterName    = "updater"
@@ -176,8 +185,9 @@ func (a *Answer) Pick(accept ...string) (Pipeline, bool) {
 }
 
 type Client struct {
-	HTTP     *http.Client
-	Endpoint string
+	HTTP              *http.Client
+	Endpoint          string
+	InstallerEndpoint string
 }
 
 func uuid() string {
@@ -349,11 +359,19 @@ func (c *Client) Check(ctx context.Context, req Request) (*Answer, error) {
 	hreq.Header.Set("X-Goog-Update-AppId", strings.ToLower(req.Channel.AppID()))
 	hreq.Header.Set("X-Goog-Update-Interactivity", interactivity)
 	hreq.Header.Set("X-Goog-Update-Updater", updaterName+"-"+updaterVersion)
+	raw, err := c.do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return parse(raw)
+}
+
+func (c *Client) do(req *http.Request) ([]byte, error) {
 	client := c.HTTP
 	if client == nil {
 		client = http.DefaultClient
 	}
-	resp, err := client.Do(hreq)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +383,7 @@ func (c *Client) Check(ctx context.Context, req Request) (*Answer, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: HTTP %s", ErrStatus, resp.Status)
 	}
-	return parse(raw)
+	return raw, nil
 }
 
 func parse(raw []byte) (*Answer, error) {
@@ -407,4 +425,105 @@ func parse(raw []byte) (*Answer, error) {
 		return nil, fmt.Errorf("%w: an update without a version or pipelines", ErrStatus)
 	}
 	return ans, nil
+}
+
+// Installer is a build's full installer, as protocol 3 links it.
+type Installer struct {
+	Version string
+	Name    string
+	Size    int64
+	SHA1    string
+	SHA256  string
+	// URLs are the server's links in its order, with the http ones that
+	// Check drops.
+	URLs []string
+}
+
+// installRequest is chrome_installer's fetch.py request: a fresh install
+// by Google Update 1.3.36.
+const installRequest = `<?xml version="1.0" encoding="UTF-8"?>
+<request protocol="3.0" updater="Omaha" updaterversion="1.3.36.372" shell_version="1.3.36.352" ismachine="0" sessionid="{11111111-1111-1111-1111-111111111111}" installsource="taggedmi" requestid="{11111111-1111-1111-1111-111111111111}" dedup="cr" domainjoined="0">
+<hw physmemory="16" sse="1" sse2="1" sse3="1" ssse3="1" sse41="1" sse42="1" avx="1"/>
+<os platform="win" version="` + osVersion + `" arch="%s"/>
+<app version="" appid="%s" ap="%s">
+<updatecheck/>
+<data name="install" index="empty"/>
+</app>
+</request>`
+
+func (c *Client) Installer(ctx context.Context, ch Channel, arch string) (*Installer, error) {
+	if !ch.Valid() {
+		return nil, fmt.Errorf("unknown channel %q", ch)
+	}
+	switch arch {
+	case "x86", "x64", "arm64":
+	default:
+		return nil, fmt.Errorf("unknown architecture %q", arch)
+	}
+	endpoint := c.InstallerEndpoint
+	if endpoint == "" {
+		endpoint = InstallerEndpoint
+	}
+	body := fmt.Sprintf(installRequest, arch, ch.AppID(), ch.ap(arch))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	return parseInstaller(raw)
+}
+
+type installResponse struct {
+	Apps []struct {
+		Status      string `xml:"status,attr"`
+		UpdateCheck struct {
+			Status string `xml:"status,attr"`
+			URLs   []struct {
+				Codebase string `xml:"codebase,attr"`
+			} `xml:"urls>url"`
+			Manifest struct {
+				Version  string `xml:"version,attr"`
+				Packages []struct {
+					Name   string `xml:"name,attr"`
+					Size   int64  `xml:"size,attr"`
+					SHA1   string `xml:"hash,attr"`
+					SHA256 string `xml:"hash_sha256,attr"`
+				} `xml:"packages>package"`
+			} `xml:"manifest"`
+		} `xml:"updatecheck"`
+	} `xml:"app"`
+}
+
+func parseInstaller(raw []byte) (*Installer, error) {
+	var r installResponse
+	if err := xml.Unmarshal(raw, &r); err != nil {
+		return nil, fmt.Errorf("update server answer: %w", err)
+	}
+	if len(r.Apps) == 0 {
+		return nil, fmt.Errorf("%w: no app in the answer", ErrStatus)
+	}
+	a := r.Apps[0]
+	if a.Status != "ok" {
+		return nil, fmt.Errorf("%w: app status %q", ErrStatus, a.Status)
+	}
+	if a.UpdateCheck.Status != "ok" {
+		return nil, fmt.Errorf("%w: %q", ErrStatus, a.UpdateCheck.Status)
+	}
+	m := a.UpdateCheck.Manifest
+	if m.Version == "" || len(m.Packages) == 0 {
+		return nil, fmt.Errorf("%w: an installer without a version or package", ErrStatus)
+	}
+	p := m.Packages[0]
+	sha1, err := base64.StdEncoding.DecodeString(p.SHA1)
+	if err != nil {
+		return nil, fmt.Errorf("update server answer: SHA-1 %q: %w", p.SHA1, err)
+	}
+	in := &Installer{Version: m.Version, Name: p.Name, Size: p.Size, SHA1: hex.EncodeToString(sha1), SHA256: p.SHA256}
+	for _, u := range a.UpdateCheck.URLs {
+		in.URLs = append(in.URLs, u.Codebase+p.Name)
+	}
+	return in, nil
 }
