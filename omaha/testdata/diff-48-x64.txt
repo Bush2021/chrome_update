@@ -1,0 +1,195 @@
+)]}'
+{
+ "response": {
+  "server": "prod",
+  "protocol": "4.0",
+  "daystart": {
+   "elapsed_seconds": 24068,
+   "elapsed_days": 7240
+  },
+  "apps": [
+   {
+    "appid": "{8a69d345-d564-463c-aff1-a69d9e530f96}",
+    "cohort": "1:gu/i19:",
+    "status": "ok",
+    "cohortname": "Stable Installs & Version Pins",
+    "updatecheck": {
+     "nextversion": "156.0.8078.74",
+     "status": "ok",
+     "pipelines": [
+      {
+       "pipeline_id": "1:zucc:a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38:f103730ff086d28c880c0de44e7fc6a7df72ce79c1e83dc6a46151031c490f6b",
+       "operations": [
+        {
+         "size": 16725732,
+         "type": "download",
+         "out": {
+          "sha256": "fa3c894ca581f8b24ef851d153c0441d14e6471ec2c95379a13227055ff10abb"
+         },
+         "urls": [
+          {
+           "url": "http://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/fa3c894ca581f8b24ef851d153c0441d14e6471ec2c95379a13227055ff10abb"
+          },
+          {
+           "url": "https://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/fa3c894ca581f8b24ef851d153c0441d14e6471ec2c95379a13227055ff10abb"
+          },
+          {
+           "url": "http://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/fa3c894ca581f8b24ef851d153c0441d14e6471ec2c95379a13227055ff10abb"
+          },
+          {
+           "url": "https://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/fa3c894ca581f8b24ef851d153c0441d14e6471ec2c95379a13227055ff10abb"
+          }
+         ]
+        },
+        {
+         "type": "xz"
+        },
+        {
+         "type": "zucc",
+         "previous": {
+          "sha256": "f103730ff086d28c880c0de44e7fc6a7df72ce79c1e83dc6a46151031c490f6b"
+         },
+         "out": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        },
+        {
+         "path": "156.0.8078.74_chrome_installer_uncompressed.exe",
+         "size": 525473563,
+         "arguments": "--verbose-logging --do-not-launch-chrome --channel=stable",
+         "type": "crx3",
+         "in": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        }
+       ]
+      },
+      {
+       "pipeline_id": "1:puff:a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38:f103730ff086d28c880c0de44e7fc6a7df72ce79c1e83dc6a46151031c490f6b",
+       "operations": [
+        {
+         "size": 38768085,
+         "type": "download",
+         "out": {
+          "sha256": "a9d3d22ac115f942c86f1918440e5630af289d2e553d89d9a8b229bb6d2d2294"
+         },
+         "urls": [
+          {
+           "url": "http://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/a9d3d22ac115f942c86f1918440e5630af289d2e553d89d9a8b229bb6d2d2294"
+          },
+          {
+           "url": "https://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/a9d3d22ac115f942c86f1918440e5630af289d2e553d89d9a8b229bb6d2d2294"
+          },
+          {
+           "url": "http://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/a9d3d22ac115f942c86f1918440e5630af289d2e553d89d9a8b229bb6d2d2294"
+          },
+          {
+           "url": "https://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/a9d3d22ac115f942c86f1918440e5630af289d2e553d89d9a8b229bb6d2d2294"
+          }
+         ]
+        },
+        {
+         "type": "puff",
+         "previous": {
+          "sha256": "f103730ff086d28c880c0de44e7fc6a7df72ce79c1e83dc6a46151031c490f6b"
+         },
+         "out": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        },
+        {
+         "path": "156.0.8078.74_chrome_installer_uncompressed.exe",
+         "size": 525473563,
+         "arguments": "--verbose-logging --do-not-launch-chrome --channel=stable",
+         "type": "crx3",
+         "in": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        }
+       ]
+      },
+      {
+       "pipeline_id": "1:xz:a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38:any",
+       "operations": [
+        {
+         "size": 189933192,
+         "type": "download",
+         "out": {
+          "sha256": "e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+         },
+         "urls": [
+          {
+           "url": "http://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          },
+          {
+           "url": "https://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          },
+          {
+           "url": "http://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          },
+          {
+           "url": "https://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          }
+         ]
+        },
+        {
+         "type": "xz"
+        },
+        {
+         "path": "156.0.8078.74_chrome_installer_uncompressed.exe",
+         "size": 525473563,
+         "arguments": "--verbose-logging --do-not-launch-chrome --channel=stable",
+         "type": "crx3",
+         "in": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        }
+       ]
+      },
+      {
+       "pipeline_id": "1:full:a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38:any",
+       "operations": [
+        {
+         "size": 525473563,
+         "type": "download",
+         "out": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         },
+         "urls": [
+          {
+           "url": "http://edgedl.me.gvt1.com/edgedl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "https://edgedl.me.gvt1.com/edgedl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "http://dl.google.com/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "https://dl.google.com/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "http://www.google.com/dl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "https://www.google.com/dl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          }
+         ]
+        },
+        {
+         "path": "156.0.8078.74_chrome_installer_uncompressed.exe",
+         "size": 525473563,
+         "arguments": "--verbose-logging --do-not-launch-chrome --channel=stable",
+         "type": "crx3",
+         "in": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ }
+}

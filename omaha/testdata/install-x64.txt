@@ -1,0 +1,104 @@
+)]}'
+{
+ "response": {
+  "server": "prod",
+  "protocol": "4.0",
+  "daystart": {
+   "elapsed_seconds": 24016,
+   "elapsed_days": 7240
+  },
+  "apps": [
+   {
+    "appid": "{8a69d345-d564-463c-aff1-a69d9e530f96}",
+    "cohort": "1:gu/i19:",
+    "status": "ok",
+    "cohortname": "Stable Installs & Version Pins",
+    "updatecheck": {
+     "nextversion": "156.0.8078.74",
+     "status": "ok",
+     "pipelines": [
+      {
+       "pipeline_id": "1:xz:a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38:any",
+       "operations": [
+        {
+         "size": 189933192,
+         "type": "download",
+         "out": {
+          "sha256": "e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+         },
+         "urls": [
+          {
+           "url": "http://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          },
+          {
+           "url": "https://edgedl.me.gvt1.com/edgedl/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          },
+          {
+           "url": "http://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          },
+          {
+           "url": "https://dl.google.com/diffgen-puffin/{8a69d345-d564-463c-aff1-a69d9e530f96}/e51c98b6a57cc678883fd9d67c0c57d5f251adacd0cd0aeb568b7c15b21b9490"
+          }
+         ]
+        },
+        {
+         "type": "xz"
+        },
+        {
+         "path": "156.0.8078.74_chrome_installer_uncompressed.exe",
+         "size": 525473563,
+         "arguments": "--verbose-logging --do-not-launch-chrome --channel=stable",
+         "type": "crx3",
+         "in": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        }
+       ]
+      },
+      {
+       "pipeline_id": "1:full:a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38:any",
+       "operations": [
+        {
+         "size": 525473563,
+         "type": "download",
+         "out": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         },
+         "urls": [
+          {
+           "url": "http://edgedl.me.gvt1.com/edgedl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "https://edgedl.me.gvt1.com/edgedl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "http://dl.google.com/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "https://dl.google.com/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "http://www.google.com/dl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          },
+          {
+           "url": "https://www.google.com/dl/release2/chrome/ad5r52xvjnqzfqt5hyj2o3uyaqeq_156.0.8078.74/-8a69d345-d564-463c-aff1-a69d9e530f96-_156.0.8078.74_all_fpzf27gyi6szskfn5mt6tilkui.crx3"
+          }
+         ]
+        },
+        {
+         "path": "156.0.8078.74_chrome_installer_uncompressed.exe",
+         "size": 525473563,
+         "arguments": "--verbose-logging --do-not-launch-chrome --channel=stable",
+         "type": "crx3",
+         "in": {
+          "sha256": "a65959d8f3e34537dc4c8bcabb8ed14414d8d606dc936405460d4111109d2e38"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ }
+}
