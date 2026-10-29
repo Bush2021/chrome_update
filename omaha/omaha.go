@@ -3,10 +3,9 @@
 // updater runs, or over protocol 3 for links to the full installer, which
 // protocol 4 offers only inside a CRX3 package.
 //
-// Protocol 4 requests name Google's own updater, as chrome_installer's
-// protocol 4 test does: only such requests get the xz stream and the
-// Zucchini and Puffin patches, and any other name gets only the full
-// package. The protocol is described in Chromium's
+// Protocol 4 requests name Google's own updater: only such requests get
+// the xz stream and the Zucchini and Puffin patches, and any other name
+// gets only the full package. The protocol is described in Chromium's
 // docs/updater/protocol_4.md.
 package omaha
 
@@ -60,8 +59,7 @@ func (c Channel) AppID() string {
 	return appStable
 }
 
-// ap returns the "additional parameters" naming the channel and arch, as
-// chrome_installer's fetch.py sends them.
+// ap returns the "additional parameters" naming the channel and arch.
 func (c Channel) ap(arch string) string {
 	switch c {
 	case Beta:
@@ -439,8 +437,7 @@ type Installer struct {
 	URLs []string
 }
 
-// installRequest is chrome_installer's fetch.py request: a fresh install
-// by Google Update 1.3.36.
+// installRequest asks for a fresh install, as Google Update 1.3.36 does.
 const installRequest = `<?xml version="1.0" encoding="UTF-8"?>
 <request protocol="3.0" updater="Omaha" updaterversion="1.3.36.372" shell_version="1.3.36.352" ismachine="0" sessionid="{11111111-1111-1111-1111-111111111111}" installsource="taggedmi" requestid="{11111111-1111-1111-1111-111111111111}" dedup="cr" domainjoined="0">
 <hw physmemory="16" sse="1" sse2="1" sse3="1" ssse3="1" sse41="1" sse42="1" avx="1"/>
