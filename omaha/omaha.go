@@ -107,22 +107,22 @@ type Request struct {
 }
 
 type Op struct {
-	Type string
-	Size int64
+	Type string `json:"type"`
+	Size int64  `json:"size,omitempty"`
 	// Out is the SHA-256 of the step's output (download, zucc, puff).
-	Out string
+	Out string `json:"out,omitempty"`
 	// In is the SHA-256 of the package a crx3 step installs.
-	In string
+	In string `json:"in,omitempty"`
 	// Previous is the SHA-256 of the package a patch applies to.
-	Previous string
-	URLs     []string
+	Previous string   `json:"previous,omitempty"`
+	URLs     []string `json:"urls,omitempty"`
 	// Path is the installer inside a crx3 package.
-	Path string
+	Path string `json:"path,omitempty"`
 }
 
 type Pipeline struct {
-	ID  string
-	Ops []Op
+	ID  string `json:"id"`
+	Ops []Op   `json:"ops"`
 }
 
 // Kind returns the pipeline's strategy, the second field of its ID:
