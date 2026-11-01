@@ -57,23 +57,24 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// dst appears only once the output matches wantSHA256.
-func DecodeXZ(ctx context.Context, src, dst, wantSHA256 string, total int64, progress Progress) error {
+// DecodeXZ decodes the stream r into dst, which appears only once the output
+// matches wantSHA256.
+func DecodeXZ(ctx context.Context, r io.Reader, dst, wantSHA256 string, total int64, progress Progress) error {
 	if progress == nil {
 		progress = noProgress
 	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	r, err := xz.NewReader(bufio.NewReaderSize(ctxReader{ctx, in}, 1<<20))
-	if err != nil {
-		return fmt.Errorf("%s: %w", filepath.Base(src), err)
-	}
 	return writeVerified(dst, wantSHA256, func(w io.Writer) error {
-		_, err := io.CopyBuffer(&progressWriter{w: w, total: total, progress: progress}, r, make([]byte, 1<<20))
-		return err
+		zr, err := xz.NewReader(bufio.NewReaderSize(ctxReader{ctx, r}, 1<<20))
+		if err == nil {
+			_, err = io.CopyBuffer(&progressWriter{w: w, total: total, progress: progress}, zr, make([]byte, 1<<20))
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr // decoders may wrap or replace it
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", filepath.Base(dst), err)
+		}
+		return nil
 	})
 }
 

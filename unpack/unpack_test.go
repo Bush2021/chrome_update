@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -32,12 +33,10 @@ func TestDecodeXZ(t *testing.T) {
 	w.Write(data)
 	w.Close()
 	dir := t.TempDir()
-	src := filepath.Join(dir, "in.xz")
-	os.WriteFile(src, buf.Bytes(), 0o644)
 
 	dst := filepath.Join(dir, "out")
 	var last int64
-	if err := DecodeXZ(context.Background(), src, dst, sum(data), int64(len(data)), func(done, _ int64) { last = done }); err != nil {
+	if err := DecodeXZ(context.Background(), bytes.NewReader(buf.Bytes()), dst, sum(data), int64(len(data)), func(done, _ int64) { last = done }); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(dst); !bytes.Equal(got, data) || last != int64(len(data)) {
@@ -45,13 +44,39 @@ func TestDecodeXZ(t *testing.T) {
 	}
 
 	bad := filepath.Join(dir, "bad")
-	if err := DecodeXZ(context.Background(), src, bad, sum([]byte("other")), 0, nil); err == nil {
+	if err := DecodeXZ(context.Background(), bytes.NewReader(buf.Bytes()), bad, sum([]byte("other")), 0, nil); err == nil {
 		t.Fatal("kept output with the wrong SHA-256")
 	}
 	for _, p := range []string{bad, bad + ".part"} {
 		if _, err := os.Stat(p); err == nil {
 			t.Errorf("%s left behind", p)
 		}
+	}
+}
+
+func TestDecodeXZCancel(t *testing.T) {
+	var buf bytes.Buffer
+	w, err := xz.NewWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 1<<20)
+	rand.Read(data)
+	w.Write(data)
+	w.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	go func() {
+		pw.Write(buf.Bytes()[:buf.Len()/2])
+		cancel()
+		pw.CloseWithError(errors.New("the stream broke"))
+	}()
+	dst := filepath.Join(t.TempDir(), "out")
+	if err := DecodeXZ(ctx, pr, dst, sum(data), 0, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(dst + ".part"); err == nil {
+		t.Error("the partial output is left behind")
 	}
 }
 
