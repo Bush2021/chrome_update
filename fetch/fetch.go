@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,12 @@ type File struct {
 	Size   int64
 	SHA256 string
 	Dest   string
+	// Follow, if set, reads the file from its first byte while it downloads,
+	// and Get waits for it. Its reader blocks at the bytes yet to come, and
+	// they are not verified until Get returns. A failed Follow does not stop
+	// the download. If the download starts over, Follow runs again on the
+	// finished file, so it must not keep what an earlier run produced.
+	Follow func(io.Reader) error
 }
 
 var ErrMismatch = errors.New("the download does not match its expected size or SHA-256")
@@ -47,11 +54,11 @@ func Get(ctx context.Context, client *http.Client, f File, progress Progress) er
 	if len(f.URLs) == 0 {
 		return fmt.Errorf("%s: no URL to download it from", filepath.Base(f.Dest))
 	}
-	if ok, err := Matches(f.Dest, f.Size, f.SHA256); err != nil || ok {
-		if ok {
-			progress(f.Size, f.Size)
-		}
+	if ok, err := Matches(f.Dest, f.Size, f.SHA256); err != nil {
 		return err
+	} else if ok {
+		progress(f.Size, f.Size)
+		return replay(f)
 	}
 	part := f.Dest + ".part"
 	w, err := os.OpenFile(part, os.O_RDWR|os.O_CREATE, 0o644)
@@ -67,50 +74,113 @@ func Get(ctx context.Context, client *http.Client, f File, progress Progress) er
 	if err := d.rehash(); err != nil {
 		return err
 	}
-	var lastErr error
-	for _, url := range f.URLs {
-		for attempt := 0; attempt <= retries; attempt++ {
-			if attempt > 0 {
-				select {
-				case <-time.After(backoff(attempt - 1)):
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}
-			lastErr = d.from(ctx, client, url)
-			if lastErr == nil {
-				break
-			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			var perm permanent
-			if errors.As(lastErr, &perm) {
-				break
-			}
-		}
-		if lastErr == nil {
-			break
-		}
-	}
-	if lastErr != nil {
-		return lastErr
-	}
-	if d.off != f.Size || !strings.EqualFold(hex.EncodeToString(d.h.Sum(nil)), f.SHA256) {
-		w.Close()
-		w = nil
-		os.Remove(part)
-		return fmt.Errorf("%s: %w", filepath.Base(f.Dest), ErrMismatch)
-	}
-	if err := w.Sync(); err != nil {
+	if err := d.follow(part); err != nil {
 		return err
 	}
-	if err := w.Close(); err != nil {
-		w = nil
-		return err
+	err = d.fromAny(ctx, client)
+	mismatch := err == nil && (d.off != f.Size || !strings.EqualFold(hex.EncodeToString(d.h.Sum(nil)), f.SHA256))
+	if mismatch {
+		err = fmt.Errorf("%s: %w", filepath.Base(f.Dest), ErrMismatch)
+	}
+	if err == nil {
+		err = w.Sync()
+	}
+	followed := d.t.close(err)
+	if cerr := w.Close(); err == nil {
+		err = cerr
 	}
 	w = nil
-	return os.Rename(part, f.Dest)
+	if mismatch {
+		os.Remove(part)
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(part, f.Dest); err != nil {
+		return err
+	}
+	if d.t != nil && d.t.restarted {
+		return replay(f)
+	}
+	return followed
+}
+
+func replay(f File) error {
+	if f.Follow == nil {
+		return nil
+	}
+	r, err := os.Open(f.Dest)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	return f.Follow(r)
+}
+
+// tail is the reader File.Follow gets. It has its own handle on the partial
+// file, so a slow follower never holds the download back.
+type tail struct {
+	r      *os.File
+	off    int64
+	result chan error
+
+	mu        sync.Mutex
+	changed   sync.Cond
+	size      int64
+	restarted bool
+	end       error
+}
+
+var errRestarted = errors.New("the download started over")
+
+func (t *tail) Read(p []byte) (int, error) {
+	t.mu.Lock()
+	for t.off == t.size && t.end == nil && !t.restarted {
+		t.changed.Wait()
+	}
+	size, restarted, end := t.size, t.restarted, t.end
+	t.mu.Unlock()
+	if restarted {
+		return 0, errRestarted
+	}
+	if end != nil && (end != io.EOF || t.off == size) {
+		return 0, end
+	}
+	if int64(len(p)) > size-t.off {
+		p = p[:size-t.off]
+	}
+	n, err := t.r.ReadAt(p, t.off)
+	t.off += int64(n)
+	if err == io.EOF {
+		// The file shrank under us: the next Read sees why.
+		err = nil
+	}
+	return n, err
+}
+
+func (t *tail) update(change func()) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	change()
+	t.mu.Unlock()
+	t.changed.Broadcast()
+}
+
+// close ends the reader and returns Follow's result. With a nil err the
+// reader gets the rest of the file and then io.EOF, otherwise err at once.
+func (t *tail) close(err error) error {
+	if t == nil {
+		return nil
+	}
+	if err == nil {
+		err = io.EOF
+	}
+	t.update(func() { t.end = err })
+	result := <-t.result
+	t.r.Close()
+	return result
 }
 
 type permanent struct{ error }
@@ -123,6 +193,48 @@ type download struct {
 	h        hash.Hash
 	off      int64
 	progress Progress
+	t        *tail
+}
+
+func (d *download) follow(part string) error {
+	if d.f.Follow == nil {
+		return nil
+	}
+	r, err := os.Open(part)
+	if err != nil {
+		return err
+	}
+	d.t = &tail{r: r, size: d.off, result: make(chan error, 1)}
+	d.t.changed.L = &d.t.mu
+	go func() { d.t.result <- d.f.Follow(d.t) }()
+	return nil
+}
+
+func (d *download) fromAny(ctx context.Context, client *http.Client) error {
+	var lastErr error
+	for _, url := range d.f.URLs {
+		for attempt := 0; attempt <= retries; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-time.After(backoff(attempt - 1)):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			lastErr = d.from(ctx, client, url)
+			if lastErr == nil {
+				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			var perm permanent
+			if errors.As(lastErr, &perm) {
+				break
+			}
+		}
+	}
+	return lastErr
 }
 
 func (d *download) rehash() error {
@@ -146,6 +258,7 @@ func (d *download) rehash() error {
 }
 
 func (d *download) restart() error {
+	d.t.update(func() { d.t.restarted = true })
 	if err := d.w.Truncate(0); err != nil {
 		return err
 	}
@@ -214,6 +327,7 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 			}
 			d.h.Write(buf[:n])
 			d.off += int64(n)
+			d.t.update(func() { d.t.size = d.off })
 			d.progress(d.off, d.f.Size)
 		}
 		if rerr == io.EOF {
