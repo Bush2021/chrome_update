@@ -54,9 +54,11 @@ func Get(ctx context.Context, client *http.Client, f File, progress Progress) er
 	if len(f.URLs) == 0 {
 		return fmt.Errorf("%s: no URL to download it from", filepath.Base(f.Dest))
 	}
-	if ok, err := Matches(f.Dest, f.Size, f.SHA256); err != nil {
+	ok, err := Matches(f.Dest, f.Size, f.SHA256)
+	if err != nil {
 		return err
-	} else if ok {
+	}
+	if ok {
 		progress(f.Size, f.Size)
 		return replay(f)
 	}
@@ -228,8 +230,7 @@ func (d *download) fromAny(ctx context.Context, client *http.Client) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			var perm permanent
-			if errors.As(lastErr, &perm) {
+			if _, ok := errors.AsType[permanent](lastErr); ok {
 				break
 			}
 		}

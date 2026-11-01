@@ -276,7 +276,7 @@ func ImportedDLLs(r io.ReaderAt, f *pe.File) ([]string, error) {
 	}
 	var dlls []string
 	desc := make([]byte, 20)
-	for i := 0; i < 4096; i++ {
+	for i := range 4096 {
 		if _, err := r.ReadAt(desc, off+int64(i)*20); err != nil {
 			return nil, err
 		}

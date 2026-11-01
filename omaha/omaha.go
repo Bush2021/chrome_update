@@ -11,6 +11,7 @@ package omaha
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -73,12 +74,7 @@ func (c Channel) ap(arch string) string {
 }
 
 func (c Channel) Valid() bool {
-	for _, k := range Channels {
-		if c == k {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Channels, c)
 }
 
 const (
@@ -340,10 +336,7 @@ func (c *Client) Check(ctx context.Context, req Request) (*Answer, error) {
 	if err != nil {
 		return nil, err
 	}
-	endpoint := c.Endpoint
-	if endpoint == "" {
-		endpoint = Endpoint
-	}
+	endpoint := cmp.Or(c.Endpoint, Endpoint)
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -457,10 +450,7 @@ func (c *Client) Installer(ctx context.Context, ch Channel, arch string) (*Insta
 	default:
 		return nil, fmt.Errorf("unknown architecture %q", arch)
 	}
-	endpoint := c.InstallerEndpoint
-	if endpoint == "" {
-		endpoint = InstallerEndpoint
-	}
+	endpoint := cmp.Or(c.InstallerEndpoint, InstallerEndpoint)
 	body := fmt.Sprintf(installRequest, arch, ch.AppID(), ch.ap(arch))
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
 	if err != nil {

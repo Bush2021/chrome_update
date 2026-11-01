@@ -57,8 +57,7 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// DecodeXZ decodes the stream r into dst, which appears only once the output
-// matches wantSHA256.
+// dst appears only once the output matches wantSHA256.
 func DecodeXZ(ctx context.Context, r io.Reader, dst, wantSHA256 string, total int64, progress Progress) error {
 	if progress == nil {
 		progress = noProgress
