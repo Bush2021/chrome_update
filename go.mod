@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/bodgit/sevenzip v1.6.5
+	github.com/mikelolasagasti/xz v1.0.1
 	github.com/ulikunitz/xz v0.5.15
 )
 

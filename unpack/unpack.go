@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/bodgit/sevenzip"
-	"github.com/ulikunitz/xz"
+	"github.com/mikelolasagasti/xz"
 
 	"github.com/Bush2021/chrome_update/pefile"
 )
@@ -64,7 +64,7 @@ func DecodeXZ(ctx context.Context, r io.Reader, dst, wantSHA256 string, total in
 		progress = noProgress
 	}
 	return writeVerified(dst, wantSHA256, func(w io.Writer) error {
-		zr, err := xz.NewReader(bufio.NewReaderSize(ctxReader{ctx, r}, 1<<20))
+		zr, err := xz.NewReader(bufio.NewReaderSize(ctxReader{ctx, r}, 1<<20), 0)
 		if err == nil {
 			_, err = io.CopyBuffer(&progressWriter{w: w, total: total, progress: progress}, zr, make([]byte, 1<<20))
 		}
