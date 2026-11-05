@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ulikunitz/xz"
+	"github.com/Bush2021/chrome_update/unpack/unpacktest"
 )
 
 func sum(b []byte) string {
@@ -25,13 +25,7 @@ func sum(b []byte) string {
 func TestDecodeXZ(t *testing.T) {
 	data := make([]byte, 3<<20)
 	rand.Read(data[:1<<20]) // the rest compresses
-	var buf bytes.Buffer
-	w, err := xz.NewWriter(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Write(data)
-	w.Close()
+	buf := bytes.NewBuffer(unpacktest.XZ(data))
 	dir := t.TempDir()
 
 	dst := filepath.Join(dir, "out")
@@ -63,15 +57,9 @@ func TestDecodeXZ(t *testing.T) {
 }
 
 func TestDecodeXZCancel(t *testing.T) {
-	var buf bytes.Buffer
-	w, err := xz.NewWriter(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
 	data := make([]byte, 1<<20)
 	rand.Read(data)
-	w.Write(data)
-	w.Close()
+	buf := bytes.NewBuffer(unpacktest.XZ(data))
 	ctx, cancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
 	go func() {

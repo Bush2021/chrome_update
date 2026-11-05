@@ -13,17 +13,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
-	"github.com/bodgit/sevenzip"
-	"github.com/mikelolasagasti/xz"
+	"github.com/go-compressions/xz"
 
 	"github.com/Bush2021/chrome_update/pefile"
+	"github.com/Bush2021/chrome_update/sevenz"
 )
 
 // total is 0 when unknown.
@@ -65,7 +64,7 @@ func DecodeXZ(ctx context.Context, r io.Reader, dst, wantSHA256 string, total in
 		progress = noProgress
 	}
 	return writeVerified(dst, wantSHA256, func(w io.Writer) error {
-		zr, err := xz.NewReader(bufio.NewReaderSize(ctxReader{ctx, r}, 1<<20), 0)
+		zr, err := xz.NewReader(bufio.NewReaderSize(ctxReader{ctx, r}, 1<<20))
 		if err == nil {
 			_, err = io.CopyBuffer(&progressWriter{w: w, total: total, progress: progress}, zr, make([]byte, 1<<20))
 		}
@@ -169,7 +168,7 @@ func OpenInstaller(path string) (*Installer, error) {
 	return nil, fmt.Errorf("%s holds no installer", filepath.Base(path))
 }
 
-func chromeArchive(inst *Installer) (*sevenzip.Reader, error) {
+func chromeArchive(inst *Installer) (*sevenz.Reader, error) {
 	pf, err := pe.NewFile(inst)
 	if err != nil {
 		return nil, fmt.Errorf("installer: %w", err)
@@ -184,7 +183,7 @@ func chromeArchive(inst *Installer) (*sevenzip.Reader, error) {
 				if r.Offset+r.Size > inst.Size {
 					return nil, fmt.Errorf("%s runs past the installer's end", name)
 				}
-				return sevenzip.NewReader(io.NewSectionReader(inst, r.Offset, r.Size), r.Size)
+				return sevenz.NewReader(io.NewSectionReader(inst, r.Offset, r.Size), r.Size)
 			}
 		}
 	}
@@ -202,8 +201,8 @@ func ExtractChrome(ctx context.Context, inst *Installer, dir string, progress Pr
 	}
 	var total int64
 	var version string
-	for _, f := range z.File {
-		total += int64(f.UncompressedSize)
+	for _, f := range z.Files {
+		total += f.Size
 		rel, ok := strings.CutPrefix(f.Name, "Chrome-bin/")
 		if !ok {
 			continue
@@ -223,16 +222,20 @@ func ExtractChrome(ctx context.Context, inst *Installer, dir string, progress Pr
 	}
 	pw := &progressWriter{total: total, progress: progress}
 	buf := make([]byte, 1<<20)
-	for _, f := range z.File {
-		if err := ctx.Err(); err != nil {
+	for {
+		f, err := z.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
 			return "", err
 		}
 		rel, ok := strings.CutPrefix(f.Name, "Chrome-bin/")
 		if !ok || rel == "" {
-			pw.done += int64(f.UncompressedSize)
+			pw.done += f.Size // Next decodes it on the way to the next file
 			continue
 		}
-		if err := extractFile(f, dir, rel, pw, buf); err != nil {
+		if err := extractFile(ctx, z, f, dir, rel, pw, buf); err != nil {
 			return "", err
 		}
 	}
@@ -244,41 +247,31 @@ func ExtractChrome(ctx context.Context, inst *Installer, dir string, progress Pr
 	return version, nil
 }
 
-// sevenzip checks the archive's headers but not each file's CRC32.
-func extractFile(f *sevenzip.File, dir, rel string, pw *progressWriter, buf []byte) error {
+func extractFile(ctx context.Context, z *sevenz.Reader, f *sevenz.File, dir, rel string, pw *progressWriter, buf []byte) error {
 	clean := path.Clean(rel)
 	if !filepath.IsLocal(filepath.FromSlash(clean)) {
 		return fmt.Errorf("unsafe path %q in the archive", f.Name)
 	}
 	dst := filepath.Join(dir, filepath.FromSlash(clean))
-	if f.FileInfo().IsDir() {
+	if f.Dir {
 		return os.MkdirAll(dst, 0o755)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	rc, err := f.Open()
-	if err != nil {
-		return fmt.Errorf("%s: %w", f.Name, err)
-	}
-	defer rc.Close()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	h := crc32.NewIEEE()
-	pw.w = io.MultiWriter(out, h)
-	n, err := io.CopyBuffer(pw, rc, buf)
+	pw.w = out
+	_, err = io.CopyBuffer(pw, ctxReader{ctx, z}, buf)
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
-	if err != nil {
-		return fmt.Errorf("%s: %w", f.Name, err)
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
 	}
-	if n != int64(f.UncompressedSize) || (f.CRC32 != 0 && h.Sum32() != f.CRC32) {
-		return fmt.Errorf("%s: damaged in the archive", f.Name)
-	}
-	return nil
+	return err
 }
 
 func isVersion(s string) bool {
