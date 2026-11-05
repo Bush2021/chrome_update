@@ -43,6 +43,14 @@ func TestDecodeXZ(t *testing.T) {
 		t.Fatalf("decoded %d bytes, progress %d", len(got), last)
 	}
 
+	unchecked := filepath.Join(dir, "unchecked")
+	if err := DecodeXZ(context.Background(), bytes.NewReader(buf.Bytes()), unchecked, "", 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(unchecked); !bytes.Equal(got, data) {
+		t.Fatalf("decoded %d bytes without a SHA-256", len(got))
+	}
+
 	bad := filepath.Join(dir, "bad")
 	if err := DecodeXZ(context.Background(), bytes.NewReader(buf.Bytes()), bad, sum([]byte("other")), 0, nil); err == nil {
 		t.Fatal("kept output with the wrong SHA-256")

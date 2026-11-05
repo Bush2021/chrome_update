@@ -57,7 +57,9 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// dst appears only once the output matches wantSHA256.
+// dst appears only once the output matches wantSHA256. An empty one
+// checks nothing, for an xz step whose output the next step checks, as a
+// zucc step does.
 func DecodeXZ(ctx context.Context, r io.Reader, dst, wantSHA256 string, total int64, progress Progress) error {
 	if progress == nil {
 		progress = noProgress
@@ -95,7 +97,7 @@ func writeVerified(dst, want string, fill func(io.Writer) error) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), want) {
+	if err == nil && want != "" && !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), want) {
 		err = fmt.Errorf("%s does not match its SHA-256", filepath.Base(dst))
 	}
 	if err != nil {
