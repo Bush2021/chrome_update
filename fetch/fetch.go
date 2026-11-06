@@ -35,10 +35,17 @@ type File struct {
 
 var ErrMismatch = errors.New("the download does not match its expected size or SHA-256")
 
-const retries = 3
+// rounds is how many times each URL is tried. A round tries every URL
+// once, as the update protocol has a client fall back to the next URL
+// before it retries one. A round that brought new bytes does not count.
+const rounds = 3
 
-// A variable so that tests need not wait.
-var backoff = func(n int) time.Duration { return time.Duration(1<<n) * time.Second }
+// Variables so that tests need not wait. stall is how long a request may
+// go without a byte, its response's headers included.
+var (
+	backoff = func(n int) time.Duration { return time.Duration(1<<n) * time.Second }
+	stall   = 30 * time.Second
+)
 
 // Get downloads f into f.Dest. A complete f.Dest is kept as it is, and the
 // f.Dest+".part" an earlier attempt left is resumed. The bytes go to
@@ -80,9 +87,8 @@ func Get(ctx context.Context, client *http.Client, f File, progress Progress) er
 		return err
 	}
 	err = d.fromAny(ctx, client)
-	mismatch := err == nil && (d.off != f.Size || !strings.EqualFold(hex.EncodeToString(d.h.Sum(nil)), f.SHA256))
-	if mismatch {
-		err = fmt.Errorf("%s: %w", filepath.Base(f.Dest), ErrMismatch)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("%s: %w", filepath.Base(f.Dest), err)
 	}
 	if err == nil {
 		err = w.Sync()
@@ -92,7 +98,7 @@ func Get(ctx context.Context, client *http.Client, f File, progress Progress) er
 		err = cerr
 	}
 	w = nil
-	if mismatch {
+	if d.off == 0 {
 		os.Remove(part)
 	}
 	if err != nil {
@@ -185,9 +191,15 @@ func (t *tail) close(err error) error {
 	return result
 }
 
+// permanent is an error that retrying the URL won't mend.
 type permanent struct{ error }
 
 func (p permanent) Unwrap() error { return p.error }
+
+// local is an error of the file being written, which no URL mends.
+type local struct{ error }
+
+func (l local) Unwrap() error { return l.error }
 
 type download struct {
 	f        File
@@ -213,29 +225,46 @@ func (d *download) follow(part string) error {
 }
 
 func (d *download) fromAny(ctx context.Context, client *http.Client) error {
-	var lastErr error
-	for _, url := range d.f.URLs {
-		for attempt := 0; attempt <= retries; attempt++ {
-			if attempt > 0 {
-				select {
-				case <-time.After(backoff(attempt - 1)):
-				case <-ctx.Done():
-					return ctx.Err()
-				}
+	errs := make([]error, len(d.f.URLs))
+	dead := make([]bool, len(d.f.URLs))
+	wait := false
+	for round := 0; round < rounds; {
+		if wait {
+			select {
+			case <-time.After(backoff(round - 1)):
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-			lastErr = d.from(ctx, client, url)
-			if lastErr == nil {
+		}
+		tried, progressed := false, false
+		for i, url := range d.f.URLs {
+			if dead[i] {
+				continue
+			}
+			tried = true
+			start := d.off
+			err := d.from(ctx, client, url)
+			if err == nil {
 				return nil
 			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if _, ok := errors.AsType[permanent](lastErr); ok {
-				break
+			if l, ok := errors.AsType[local](err); ok {
+				return l.error
 			}
+			errs[i] = err
+			_, dead[i] = errors.AsType[permanent](err)
+			progressed = progressed || d.off > start
+		}
+		if !tried {
+			break
+		}
+		if wait = !progressed; wait {
+			round++
 		}
 	}
-	return lastErr
+	return errors.Join(errs...)
 }
 
 func (d *download) rehash() error {
@@ -254,8 +283,15 @@ func (d *download) rehash() error {
 		return err
 	}
 	d.off = n
+	if d.off == d.f.Size && !d.matches() {
+		return d.restart()
+	}
 	d.progress(d.off, d.f.Size)
 	return nil
+}
+
+func (d *download) matches() bool {
+	return strings.EqualFold(hex.EncodeToString(d.h.Sum(nil)), d.f.SHA256)
 }
 
 func (d *download) restart() error {
@@ -271,11 +307,24 @@ func (d *download) restart() error {
 	return nil
 }
 
+// from downloads the rest of the file from url. A request that goes stall
+// without a byte is given up, which the transport alone would not do once
+// it has a connection.
 func (d *download) from(ctx context.Context, client *http.Client, url string) error {
 	if d.off == d.f.Size {
 		return nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stalled := time.AfterFunc(stall, cancel)
+	defer stalled.Stop()
+	why := func(err error) error {
+		if ctx.Err() == nil && rctx.Err() != nil {
+			return fmt.Errorf("%s: no data for %s", url, stall)
+		}
+		return err
+	}
+	req, err := http.NewRequestWithContext(rctx, http.MethodGet, url, nil)
 	if err != nil {
 		return permanent{err}
 	}
@@ -284,7 +333,7 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return why(err)
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
@@ -292,7 +341,7 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 		if d.off > 0 {
 			// The server ignored the range: start over.
 			if err := d.restart(); err != nil {
-				return permanent{err}
+				return local{err}
 			}
 		}
 		if resp.ContentLength >= 0 && resp.ContentLength != d.f.Size {
@@ -305,9 +354,9 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 		}
 	case http.StatusRequestedRangeNotSatisfiable:
 		if err := d.restart(); err != nil {
-			return permanent{err}
+			return local{err}
 		}
-		return errors.New("the server refused the range; starting over")
+		return fmt.Errorf("%s: the server refused the range; starting over", url)
 	default:
 		err := fmt.Errorf("%s: %s", url, resp.Status)
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
@@ -316,15 +365,16 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 		return err
 	}
 	if _, err := d.w.Seek(d.off, io.SeekStart); err != nil {
-		return permanent{err}
+		return local{err}
 	}
 	buf := make([]byte, 1<<20)
 	body := io.LimitReader(resp.Body, d.f.Size-d.off)
 	for {
 		n, rerr := body.Read(buf)
 		if n > 0 {
+			stalled.Reset(stall)
 			if _, err := d.w.Write(buf[:n]); err != nil {
-				return permanent{err}
+				return local{err}
 			}
 			d.h.Write(buf[:n])
 			d.off += int64(n)
@@ -333,12 +383,18 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 		}
 		if rerr == io.EOF {
 			if d.off < d.f.Size {
-				return io.ErrUnexpectedEOF
+				return fmt.Errorf("%s: %w", url, io.ErrUnexpectedEOF)
+			}
+			if !d.matches() {
+				if err := d.restart(); err != nil {
+					return local{err}
+				}
+				return permanent{fmt.Errorf("%s: %w", url, ErrMismatch)}
 			}
 			return nil
 		}
 		if rerr != nil {
-			return rerr
+			return why(fmt.Errorf("%s: %w", url, rerr))
 		}
 	}
 }

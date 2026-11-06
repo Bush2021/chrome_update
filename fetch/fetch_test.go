@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +21,10 @@ import (
 	"time"
 )
 
-func init() { backoff = func(int) time.Duration { return time.Millisecond } }
+func init() {
+	backoff = func(int) time.Duration { return time.Millisecond }
+	stall = 200 * time.Millisecond
+}
 
 func blob(t *testing.T, n int) ([]byte, string) {
 	t.Helper()
@@ -142,6 +146,111 @@ func TestFallsBackToTheNextURL(t *testing.T) {
 	})
 	good := serve(t, b, nil)
 	dest, err := get(t, []string{gone.URL, good.URL}, int64(len(b)), sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFile(t, dest, b)
+}
+
+// A stalled server is left for the next URL, before its headers and after
+// some of the body.
+func TestStalledServerFallsBack(t *testing.T) {
+	b, sum := blob(t, 1<<20)
+	silent := serve(t, nil, func(w http.ResponseWriter, r *http.Request) bool {
+		<-r.Context().Done()
+		return true
+	})
+	slow := serve(t, nil, func(w http.ResponseWriter, r *http.Request) bool {
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(b[:4096])
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		return true
+	})
+	good := serve(t, b, nil)
+	dest, err := get(t, []string{silent.URL, slow.URL, good.URL}, int64(len(b)), sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFile(t, dest, b)
+}
+
+// Every URL is tried once before any is tried again.
+func TestTriesEveryURLBeforeRetrying(t *testing.T) {
+	b, sum := blob(t, 1000)
+	var mu sync.Mutex
+	var log []string
+	var bCalls atomic.Int32
+	a := serve(t, b, func(w http.ResponseWriter, r *http.Request) bool {
+		mu.Lock()
+		log = append(log, "a")
+		mu.Unlock()
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+		return true
+	})
+	bSrv := serve(t, b, func(w http.ResponseWriter, r *http.Request) bool {
+		mu.Lock()
+		log = append(log, "b")
+		mu.Unlock()
+		if bCalls.Add(1) == 1 {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	if _, err := get(t, []string{a.URL, bSrv.URL}, int64(len(b)), sum); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(log, ""); got != "abab" {
+		t.Errorf("requests went %s, want abab", got)
+	}
+}
+
+func TestErrorNamesEveryURL(t *testing.T) {
+	b, sum := blob(t, 1000)
+	gone := serve(t, nil, func(w http.ResponseWriter, r *http.Request) bool { http.NotFound(w, r); return true })
+	busy := serve(t, nil, func(w http.ResponseWriter, r *http.Request) bool {
+		http.Error(w, "busy", http.StatusBadGateway)
+		return true
+	})
+	_, err := get(t, []string{gone.URL, busy.URL}, int64(len(b)), sum)
+	if err == nil || !strings.Contains(err.Error(), gone.URL+": 404") || !strings.Contains(err.Error(), busy.URL+": 502") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Bytes that fail the hash are thrown away, and the next URL starts over.
+func TestMismatchFallsBack(t *testing.T) {
+	b, sum := blob(t, 1<<20)
+	wrong, _ := blob(t, 1<<20)
+	bad := serve(t, wrong, nil)
+	good := serve(t, b, nil)
+	dest, err := get(t, []string{bad.URL, good.URL}, int64(len(b)), sum)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFile(t, dest, b)
+}
+
+// A connection that drops again and again still finishes the file, as long
+// as each one brings new bytes.
+func TestProgressDoesNotUseUpTheRounds(t *testing.T) {
+	b, sum := blob(t, 1<<20)
+	const chunk = 64 << 10
+	srv := serve(t, b, func(w http.ResponseWriter, r *http.Request) bool {
+		var from int
+		fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-", &from)
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", from, len(b)-1, len(b)))
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)-from))
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write(b[from:min(from+chunk, len(b))])
+		if from+chunk < len(b) {
+			panic(http.ErrAbortHandler)
+		}
+		return true
+	})
+	dest, err := get(t, []string{srv.URL}, int64(len(b)), sum)
 	if err != nil {
 		t.Fatal(err)
 	}
