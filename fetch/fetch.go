@@ -309,7 +309,9 @@ func (d *download) restart() error {
 
 // from downloads the rest of the file from url. A request that goes stall
 // without a byte is given up, which the transport alone would not do once
-// it has a connection.
+// it has a connection. A URL that sent nothing at all is not tried again:
+// waiting out the stall on every round would keep the download from
+// failing for minutes.
 func (d *download) from(ctx context.Context, client *http.Client, url string) error {
 	if d.off == d.f.Size {
 		return nil
@@ -318,9 +320,13 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 	defer cancel()
 	stalled := time.AfterFunc(stall, cancel)
 	defer stalled.Stop()
+	got := false
 	why := func(err error) error {
 		if ctx.Err() == nil && rctx.Err() != nil {
-			return fmt.Errorf("%s: no data for %s", url, stall)
+			err = fmt.Errorf("%s: no data for %s", url, stall)
+			if !got {
+				return permanent{err}
+			}
 		}
 		return err
 	}
@@ -372,6 +378,7 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 	for {
 		n, rerr := body.Read(buf)
 		if n > 0 {
+			got = true
 			stalled.Reset(stall)
 			if _, err := d.w.Write(buf[:n]); err != nil {
 				return local{err}

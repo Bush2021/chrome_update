@@ -176,6 +176,24 @@ func TestStalledServerFallsBack(t *testing.T) {
 	checkFile(t, dest, b)
 }
 
+// A URL that never sends a byte is not waited on again.
+func TestSilentURLIsTriedOnce(t *testing.T) {
+	b, sum := blob(t, 1000)
+	var calls atomic.Int32
+	silent := func(w http.ResponseWriter, r *http.Request) bool {
+		calls.Add(1)
+		<-r.Context().Done()
+		return true
+	}
+	a, c := serve(t, nil, silent), serve(t, nil, silent)
+	if _, err := get(t, []string{a.URL, c.URL}, int64(len(b)), sum); err == nil {
+		t.Fatal("got no error")
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("%d requests, want 2", n)
+	}
+}
+
 // Every URL is tried once before any is tried again.
 func TestTriesEveryURLBeforeRetrying(t *testing.T) {
 	b, sum := blob(t, 1000)
