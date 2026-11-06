@@ -176,6 +176,45 @@ func TestCheckAgainstAServer(t *testing.T) {
 	}
 }
 
+func TestRetryAfter(t *testing.T) {
+	answer := fixture(t, "install-x64.txt")
+	for _, tc := range []struct {
+		header string
+		status int
+		want   time.Duration
+	}{
+		{"", http.StatusOK, 0},
+		{"3600", http.StatusOK, time.Hour},
+		{"90000", http.StatusOK, 24 * time.Hour},
+		{"soon", http.StatusOK, 0},
+		{"-5", http.StatusOK, 0},
+		{"600", http.StatusServiceUnavailable, 10 * time.Minute},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if tc.header != "" {
+				w.Header().Set("X-Retry-After", tc.header)
+			}
+			w.WriteHeader(tc.status)
+			w.Write(answer)
+		}))
+		a, err := (&Client{Endpoint: srv.URL}).Check(context.Background(), Request{Channel: Stable, Arch: "x64"})
+		srv.Close()
+		var got time.Duration
+		var se *StatusError
+		switch {
+		case errors.As(err, &se) && errors.Is(err, ErrStatus):
+			got = se.RetryAfter
+		case err != nil:
+			t.Fatalf("%q, %d: %v", tc.header, tc.status, err)
+		default:
+			got = a.RetryAfter
+		}
+		if got != tc.want {
+			t.Errorf("%q, %d: retry after %v, want %v", tc.header, tc.status, got, tc.want)
+		}
+	}
+}
+
 func TestParseInstaller(t *testing.T) {
 	in, err := parseInstaller(fixture(t, "installer-x64.xml"))
 	if err != nil {

@@ -23,7 +23,9 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -156,6 +158,9 @@ type Answer struct {
 	// up to date.
 	Version   string
 	Pipelines []Pipeline
+	// RetryAfter is how long the server asked for no background request,
+	// by its X-Retry-After header; 0 when it didn't.
+	RetryAfter time.Duration
 }
 
 func (a *Answer) Pick(accept ...string) (Pipeline, bool) {
@@ -331,6 +336,30 @@ type response struct {
 
 var ErrStatus = errors.New("update server error")
 
+// StatusError is an answer other than 200 OK. It is ErrStatus.
+type StatusError struct {
+	Status string
+	// RetryAfter is as in Answer, which the protocol has a client respect
+	// whatever the status.
+	RetryAfter time.Duration
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("%v: HTTP %s", ErrStatus, e.Status) }
+
+func (e *StatusError) Is(target error) bool { return target == ErrStatus }
+
+// maxRetryAfter is the longest X-Retry-After the protocol has a client
+// honor; longer ones count as this.
+const maxRetryAfter = 24 * time.Hour
+
+func retryAfter(h http.Header) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(h.Get("X-Retry-After")))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return min(time.Duration(n)*time.Second, maxRetryAfter)
+}
+
 func (c *Client) Check(ctx context.Context, req Request) (*Answer, error) {
 	body, err := req.body()
 	if err != nil {
@@ -350,31 +379,34 @@ func (c *Client) Check(ctx context.Context, req Request) (*Answer, error) {
 	hreq.Header.Set("X-Goog-Update-AppId", strings.ToLower(req.Channel.AppID()))
 	hreq.Header.Set("X-Goog-Update-Interactivity", interactivity)
 	hreq.Header.Set("X-Goog-Update-Updater", updaterName+"-"+updaterVersion)
-	raw, err := c.do(hreq)
+	raw, wait, err := c.do(hreq)
 	if err != nil {
 		return nil, err
 	}
-	return parse(raw)
+	a, err := parse(raw)
+	if a != nil {
+		a.RetryAfter = wait
+	}
+	return a, err
 }
 
-func (c *Client) do(req *http.Request) ([]byte, error) {
+// do returns the answer's body and its X-Retry-After.
+func (c *Client) do(req *http.Request) ([]byte, time.Duration, error) {
 	client := c.HTTP
 	if client == nil {
 		client = http.DefaultClient
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return nil, err
-	}
+	wait := retryAfter(resp.Header)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: HTTP %s", ErrStatus, resp.Status)
+		return nil, wait, &StatusError{Status: resp.Status, RetryAfter: wait}
 	}
-	return raw, nil
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	return raw, wait, err
 }
 
 func parse(raw []byte) (*Answer, error) {
@@ -456,7 +488,7 @@ func (c *Client) Installer(ctx context.Context, ch Channel, arch string) (*Insta
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.do(hreq)
+	raw, _, err := c.do(hreq)
 	if err != nil {
 		return nil, err
 	}
