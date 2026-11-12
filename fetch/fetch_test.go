@@ -186,11 +186,15 @@ func TestSilentURLIsTriedOnce(t *testing.T) {
 		return true
 	}
 	a, c := serve(t, nil, silent), serve(t, nil, silent)
-	if _, err := get(t, []string{a.URL, c.URL}, int64(len(b)), sum); err == nil {
+	_, err := get(t, []string{a.URL, c.URL}, int64(len(b)), sum)
+	if err == nil {
 		t.Fatal("got no error")
 	}
 	if n := calls.Load(); n != 2 {
 		t.Errorf("%d requests, want 2", n)
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("err = %v, want os.ErrDeadlineExceeded", err)
 	}
 }
 
@@ -235,6 +239,9 @@ func TestErrorNamesEveryURL(t *testing.T) {
 	_, err := get(t, []string{gone.URL, busy.URL}, int64(len(b)), sum)
 	if err == nil || !strings.Contains(err.Error(), gone.URL+": 404") || !strings.Contains(err.Error(), busy.URL+": 502") {
 		t.Fatalf("err = %v", err)
+	}
+	if s, ok := errors.AsType[*StatusError](err); !ok || s.URL != gone.URL || s.Code != http.StatusNotFound {
+		t.Errorf("StatusError = %+v", s)
 	}
 }
 

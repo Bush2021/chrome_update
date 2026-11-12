@@ -35,6 +35,15 @@ type File struct {
 
 var ErrMismatch = errors.New("the download does not match its expected size or SHA-256")
 
+// StatusError is a download server's answer that brought no bytes.
+type StatusError struct {
+	URL    string
+	Code   int
+	Status string
+}
+
+func (e *StatusError) Error() string { return e.URL + ": " + e.Status }
+
 // rounds is how many times each URL is tried. A round tries every URL
 // once, as the update protocol has a client fall back to the next URL
 // before it retries one. A round that brought new bytes does not count.
@@ -323,7 +332,7 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 	got := false
 	why := func(err error) error {
 		if ctx.Err() == nil && rctx.Err() != nil {
-			err = fmt.Errorf("%s: no data for %s", url, stall)
+			err = fmt.Errorf("%s: no data for %s: %w", url, stall, os.ErrDeadlineExceeded)
 			if !got {
 				return permanent{err}
 			}
@@ -364,7 +373,7 @@ func (d *download) from(ctx context.Context, client *http.Client, url string) er
 		}
 		return fmt.Errorf("%s: the server refused the range; starting over", url)
 	default:
-		err := fmt.Errorf("%s: %s", url, resp.Status)
+		err := &StatusError{URL: url, Code: resp.StatusCode, Status: resp.Status}
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
 			return permanent{err}
 		}
